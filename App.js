@@ -7,16 +7,27 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  Platform,
 } from 'react-native';
-import {initializeApp} from 'firebase/app';
+import {initializeApp, getApps} from '@react-native-firebase/app';
 import {
   getFirestore,
   collection,
-  addDoc,
   onSnapshot,
+  addDoc,
   deleteDoc,
   doc,
-} from 'firebase/firestore';
+  serverTimestamp,
+} from '@react-native-firebase/firestore';
+import {
+  getMessaging,
+  requestPermission,
+  getToken,
+  onMessage,
+  getInitialNotification,
+  onNotificationOpenedApp,
+} from '@react-native-firebase/messaging';
+import PushNotification from 'react-native-push-notification';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -29,30 +40,96 @@ const firebaseConfig = {
   measurementId: 'G-RJF7C0VNXY',
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Initialize Firebase only if no apps are initialized
+if (!getApps().length) {
+  initializeApp(firebaseConfig);
+}
+
+// Configure local notifications
+PushNotification.configure({
+  onNotification: function (notification) {
+    console.log('Local Notification:', notification);
+  },
+  requestPermissions: Platform.OS === 'ios',
+});
 
 const App = () => {
   const [note, setNote] = useState('');
   const [notes, setNotes] = useState([]);
-  const [isSeeded, setIsSeeded] = useState(false); // Flag to seed data once
+  const [isSeeded, setIsSeeded] = useState(false);
 
-  // Seed sample data (runs only once)
-  const seedData = async () => {
-    const sampleNotes = [
-      {text: 'Buy groceries', createdAt: new Date()},
-      {text: 'Finish assignment', createdAt: new Date()},
-      {text: 'Call mom', createdAt: new Date()},
-    ];
-    for (const note of sampleNotes) {
-      await addDoc(collection(db, 'Notes'), note);
+  // Request FCM permission and get token
+  const requestNotificationPermission = async () => {
+    const messaging = getMessaging(); // Get messaging instance
+    const authStatus = await requestPermission();
+    const enabled = authStatus === 1 || authStatus === 2;
+    if (enabled) {
+      const token = await getToken(messaging); // Pass messaging instance
+      console.log('FCM Token:', token);
+      const db = getFirestore();
+      await addDoc(collection(db, 'Tokens'), {token});
     }
   };
 
-  // Fetch notes in real-time from Firestore and seed data if empty
+  // Show local notification
+  const showLocalNotification = (title, message) => {
+    PushNotification.localNotification({
+      channelId: 'default-channel-id',
+      title: title,
+      message: message,
+      playSound: true,
+      soundName: 'default',
+      importance: 4,
+      priority: 4,
+    });
+  };
+
   useEffect(() => {
-    const unsubscribe = onSnapshot(
+    requestNotificationPermission();
+
+    // Create notification channel for Android
+    if (Platform.OS === 'android') {
+      PushNotification.createChannel(
+        {
+          channelId: 'default-channel-id',
+          channelName: 'Default Channel',
+          soundName: 'default',
+          importance: 4,
+          vibrate: true,
+        },
+        created => console.log(`Channel created: ${created}`),
+      );
+    }
+
+    // Get messaging instance
+    const messaging = getMessaging();
+
+    // Handle foreground FCM messages
+    const unsubscribeForeground = onMessage(messaging, async remoteMessage => {
+      // Pass messaging instance
+      showLocalNotification(
+        remoteMessage.notification.title,
+        remoteMessage.notification.body,
+      );
+    });
+
+    // Handle notification tap when app is in background
+    onNotificationOpenedApp(messaging, remoteMessage => {
+      // Pass messaging instance
+      console.log('Notification opened:', remoteMessage);
+    });
+
+    // Handle notification tap when app is quit
+    getInitialNotification(messaging).then(remoteMessage => {
+      // Pass messaging instance
+      if (remoteMessage) {
+        console.log('App opened from quit state:', remoteMessage);
+      }
+    });
+
+    // Fetch notes in real-time and simulate Cloud Function notification
+    const db = getFirestore();
+    const unsubscribeFirestore = onSnapshot(
       collection(db, 'Notes'),
       snapshot => {
         const notesList = snapshot.docs.map(doc => ({
@@ -61,29 +138,48 @@ const App = () => {
         }));
         setNotes(notesList);
 
-        // Seed data if the collection is empty and not yet seeded
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'added') {
+            const newNote = change.doc.data();
+            showLocalNotification('New Note Added', newNote.text);
+          }
+        });
+
         if (notesList.length === 0 && !isSeeded) {
           seedData().then(() => setIsSeeded(true));
         }
       },
-      error => {
-        console.error('Error fetching notes:', error);
-      },
     );
 
-    // Cleanup subscription on unmount
-    return () => unsubscribe();
+    return () => {
+      unsubscribeForeground();
+      unsubscribeFirestore();
+    };
   }, [isSeeded]);
+
+  // Seed sample data
+  const seedData = async () => {
+    const db = getFirestore();
+    const sampleNotes = [
+      {text: 'Buy groceries', createdAt: serverTimestamp()},
+      {text: 'Finish assignment', createdAt: serverTimestamp()},
+      {text: 'Call mom', createdAt: serverTimestamp()},
+    ];
+    for (const note of sampleNotes) {
+      await addDoc(collection(db, 'Notes'), note);
+    }
+  };
 
   // Add a new note to Firestore
   const addNote = async () => {
     if (note.trim()) {
       try {
+        const db = getFirestore();
         await addDoc(collection(db, 'Notes'), {
           text: note,
-          createdAt: new Date(),
+          createdAt: serverTimestamp(),
         });
-        setNote(''); // Clear input after saving
+        setNote('');
       } catch (error) {
         console.error('Error adding note:', error);
       }
@@ -93,6 +189,7 @@ const App = () => {
   // Delete a note from Firestore
   const deleteNote = async id => {
     try {
+      const db = getFirestore();
       await deleteDoc(doc(db, 'Notes', id));
     } catch (error) {
       console.error('Error deleting note:', error);
