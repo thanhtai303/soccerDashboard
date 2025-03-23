@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "1047099514697",
+    "firebase_url": "https://the-mujick-default-rtdb.firebaseio.com",
+    "project_id": "the-mujick",
+    "storage_bucket": "the-mujick.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1047099514697:android:6883f54ed723842c22c498",
+        "android_client_info": {
+          "package_name": "com.soccerdashboard"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1047099514697-jh7j0krmdvscsbla5qhmcvilaokl93f1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBv8Df5lH5b4R4E9KOP7DkRLgBOe_rTt3Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1047099514697-jh7j0krmdvscsbla5qhmcvilaokl93f1.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
