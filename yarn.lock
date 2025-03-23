@@ -2341,6 +2341,13 @@
   dependencies:
     firebase "11.3.1"
 
+"@react-native-firebase/auth@^21.12.1":
+  version "21.12.1"
+  resolved "https://registry.yarnpkg.com/@react-native-firebase/auth/-/auth-21.12.1.tgz#d6e6d8814842ff9a09711a20c1060ae34821070d"
+  integrity sha512-AMNYKwRS1Ap7raZU4R2p/vMVa11mALW+arkXjePKxVIBeZZbfSHKfmQJ0OfOpcO+V+hcGlFg9siMC1ZDei6c+w==
+  dependencies:
+    plist "^3.1.0"
+
 "@react-native-firebase/firestore@^21.12.1":
   version "21.12.1"
   resolved "https://registry.yarnpkg.com/@react-native-firebase/firestore/-/firestore-21.12.1.tgz#298c671c9481a2a63d4331966fb74516e8de6f59"
@@ -2350,6 +2357,11 @@
   version "21.12.1"
   resolved "https://registry.yarnpkg.com/@react-native-firebase/messaging/-/messaging-21.12.1.tgz#dbec0a6cd0fa6fa4c22037e319d7522a08b81f3b"
   integrity sha512-G4w6ZOuV1PRd8VFZSifJIUMvSzZihCp6B7qRx72ZbRPcvc9dCDQeYTnZbK4Vir1CWGHtLEiPAu+6OU4DybUGyA==
+
+"@react-native-google-signin/google-signin@^13.2.0":
+  version "13.2.0"
+  resolved "https://registry.yarnpkg.com/@react-native-google-signin/google-signin/-/google-signin-13.2.0.tgz#6601764d67593344cb324b98054708140cfc3653"
+  integrity sha512-1D7eWPE7itfPmNwLkBylaoiIXAvHQNalt+AfKWcgLp45ZvPh6D5wJEhbs03PJtwO7j+Nc7Z9+DjZ2auIlWzZjw==
 
 "@react-native/assets-registry@0.78.1":
   version "0.78.1"
@@ -2890,6 +2902,11 @@
   version "1.3.0"
   resolved "https://registry.yarnpkg.com/@ungap/structured-clone/-/structured-clone-1.3.0.tgz#d06bbb384ebcf6c505fde1c3d0ed4ddffe0aaff8"
   integrity sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==
+
+"@xmldom/xmldom@^0.8.8":
+  version "0.8.10"
+  resolved "https://registry.yarnpkg.com/@xmldom/xmldom/-/xmldom-0.8.10.tgz#a1337ca426aa61cef9fe15b5b28e340a72f6fa99"
+  integrity sha512-2WALfTl4xo2SkGCYRt6rDTFfk9R1czmBvUQy12gK2KuRKIpWEhcbbzy8EZXtz/jkRqHX8bFEc6FC1HjX4TUWYw==
 
 abort-controller@^3.0.0:
   version "3.0.0"
@@ -6438,6 +6455,15 @@ pkg-dir@^4.2.0:
   dependencies:
     find-up "^4.0.0"
 
+plist@^3.1.0:
+  version "3.1.0"
+  resolved "https://registry.yarnpkg.com/plist/-/plist-3.1.0.tgz#797a516a93e62f5bde55e0b9cc9c967f860893c9"
+  integrity sha512-uysumyrvkUX0rX/dEVqt8gC3sTBzd4zoWfLeS29nb53imdaXVvLINYXTI2GNqzaMuvacNx4uJQ8+b3zXR0pkgQ==
+  dependencies:
+    "@xmldom/xmldom" "^0.8.8"
+    base64-js "^1.5.1"
+    xmlbuilder "^15.1.1"
+
 point-in-polygon@^1.0.1:
   version "1.1.0"
   resolved "https://registry.yarnpkg.com/point-in-polygon/-/point-in-polygon-1.1.0.tgz#b0af2616c01bdee341cbf2894df643387ca03357"
@@ -7751,6 +7777,11 @@ ws@^7, ws@^7.5.10:
   version "7.5.10"
   resolved "https://registry.yarnpkg.com/ws/-/ws-7.5.10.tgz#58b5c20dc281633f6c19113f39b349bd8bd558d9"
   integrity sha512-+dbF1tHwZpXcbOJdVOkzLDxZP1ailvSxM6ZweXTegylPny803bFhA+vqBYw4s31NSAk4S2Qz+AKXK9a4wkdjcQ==
+
+xmlbuilder@^15.1.1:
+  version "15.1.1"
+  resolved "https://registry.yarnpkg.com/xmlbuilder/-/xmlbuilder-15.1.1.tgz#9dcdce49eea66d8d10b42cae94a79c3c8d0c2ec5"
+  integrity sha512-yMqGBqtXyeN1e3TGYvgNgDVZ3j84W4cwkOXQswghol6APgZWaff9lnbvN7MHYJOiXsvGPXtjTYJEiC9J2wv9Eg==
 
 y18n@^4.0.0:
   version "4.0.3"
