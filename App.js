@@ -1,3 +1,8 @@
+// Practice Assignment 7 - Single File Solution
+// Eastern International University, CSE 434, Quarter 2, 2024-2025
+// Student Name: [Your Name]
+// Student ID: [Your ID]
+
 import React, {useState, useEffect} from 'react';
 import {
   View,
@@ -9,6 +14,7 @@ import {
   StyleSheet,
   Platform,
   Alert,
+  Modal,
 } from 'react-native';
 import {initializeApp, getApps} from '@react-native-firebase/app';
 import {
@@ -30,6 +36,7 @@ import {
   query,
   where,
   serverTimestamp,
+  setDoc,
 } from '@react-native-firebase/firestore';
 import {
   getMessaging,
@@ -44,6 +51,7 @@ import {
   GoogleSignin,
   statusCodes,
 } from '@react-native-google-signin/google-signin';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -68,8 +76,15 @@ GoogleSignin.configure({
 
 // Configure local notifications
 PushNotification.configure({
-  onNotification: notification =>
-    console.log('Local Notification:', notification),
+  onNotification: notification => {
+    console.log('Local Notification:', notification);
+    if (notification.data && notification.data.type === 'reminder') {
+      Alert.alert(
+        'Reminder',
+        notification.message || notification.data.message,
+      );
+    }
+  },
   requestPermissions: Platform.OS === 'ios',
 });
 
@@ -80,15 +95,17 @@ const App = () => {
   const [note, setNote] = useState('');
   const [notes, setNotes] = useState([]);
   const [isSeeded, setIsSeeded] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [reminderTime, setReminderTime] = useState(new Date());
+  const [selectedNote, setSelectedNote] = useState(null);
 
   const auth = getAuth();
+  const db = getFirestore();
 
-  // Monitor authentication state and setup messaging/notes
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async user => {
       setUser(user);
       if (user) {
-        // Setup FCM and Firestore listeners for authenticated user
         const setupMessagingAndNotes = async currentUser => {
           const messaging = getMessaging();
           await requestNotificationPermission(messaging, currentUser);
@@ -110,8 +127,9 @@ const App = () => {
             messaging,
             async remoteMessage => {
               showLocalNotification(
-                remoteMessage.notification.title,
-                remoteMessage.notification.body,
+                remoteMessage.notification?.title || 'Reminder',
+                remoteMessage.notification?.body || remoteMessage.data.message,
+                remoteMessage.data,
               );
             },
           );
@@ -125,7 +143,6 @@ const App = () => {
               console.log('App opened from quit state:', remoteMessage);
           });
 
-          const db = getFirestore();
           const notesQuery = query(
             collection(db, 'Notes'),
             where('userId', '==', currentUser.uid),
@@ -138,9 +155,11 @@ const App = () => {
             setNotes(notesList);
 
             snapshot.docChanges().forEach(change => {
-              if (change.type === 'added') {
+              if (change.type === 'added' && !change.doc.data().reminderTime) {
                 const newNote = change.doc.data();
-                showLocalNotification('New Note Added', newNote.text);
+                showLocalNotification('New Note Added', newNote.text, {
+                  type: 'note',
+                });
               }
             });
 
@@ -149,9 +168,40 @@ const App = () => {
             }
           });
 
+          // Simulated "Cloud Function" - Check reminders every 60 seconds
+          const checkReminders = async () => {
+            const now = new Date();
+            const dueNotes = notes.filter(
+              note => note.reminderTime && note.reminderTime.toDate() <= now,
+            );
+
+            for (const note of dueNotes) {
+              const tokenSnapshot = await collection(db, 'Tokens')
+                .where('userId', '==', currentUser.uid)
+                .get();
+
+              if (!tokenSnapshot.empty) {
+                const token = tokenSnapshot.docs[0].data().token;
+                showLocalNotification(
+                  'Reminder',
+                  `Your note "${note.text}" is due!`,
+                  {type: 'reminder'},
+                );
+                await setDoc(
+                  doc(db, 'Notes', note.id),
+                  {reminderTime: null},
+                  {merge: true},
+                );
+              }
+            }
+          };
+
+          const intervalId = setInterval(checkReminders, 60000); // Check every minute
+
           return () => {
             unsubscribeForeground();
             unsubscribeFirestore();
+            clearInterval(intervalId);
           };
         };
 
@@ -160,22 +210,19 @@ const App = () => {
     });
 
     return unsubscribeAuth;
-  }, [auth, isSeeded]); // Dependencies: auth and isSeeded
+  }, [auth, isSeeded]);
 
-  // Request FCM permission and store token
   const requestNotificationPermission = async (messaging, currentUser) => {
     const authStatus = await requestPermission();
     const enabled = authStatus === 1 || authStatus === 2;
     if (enabled) {
       const token = await getToken(messaging);
       console.log('FCM Token:', token);
-      const db = getFirestore();
       await addDoc(collection(db, 'Tokens'), {token, userId: currentUser.uid});
     }
   };
 
-  // Show local notification
-  const showLocalNotification = (title, message) => {
+  const showLocalNotification = (title, message, data = {}) => {
     PushNotification.localNotification({
       channelId: 'default-channel-id',
       title,
@@ -184,12 +231,11 @@ const App = () => {
       soundName: 'default',
       importance: 4,
       priority: 4,
+      data,
     });
   };
 
-  // Seed sample data for the user
   const seedData = async currentUser => {
-    const db = getFirestore();
     const sampleNotes = [
       {
         text: 'Buy groceries',
@@ -208,7 +254,6 @@ const App = () => {
     }
   };
 
-  // Authentication handlers
   const register = async () => {
     try {
       await createUserWithEmailAndPassword(auth, email, password);
@@ -254,41 +299,67 @@ const App = () => {
     }
   };
 
-  // Add a new note
   const addNote = async () => {
     if (note.trim() && user) {
       try {
-        const db = getFirestore();
         await addDoc(collection(db, 'Notes'), {
           text: note,
           createdAt: serverTimestamp(),
           userId: user.uid,
+          reminderTime: reminderTime
+            ? serverTimestamp.fromDate(reminderTime)
+            : null,
         });
         setNote('');
+        setReminderTime(new Date());
       } catch (error) {
         console.error('Error adding note:', error);
       }
     }
   };
 
-  // Delete a note
+  const setReminder = async noteId => {
+    if (user && noteId) {
+      try {
+        await setDoc(
+          doc(db, 'Notes', noteId),
+          {reminderTime: serverTimestamp.fromDate(reminderTime)},
+          {merge: true},
+        );
+        setShowPicker(false);
+        setSelectedNote(null);
+      } catch (error) {
+        console.error('Error setting reminder:', error);
+      }
+    }
+  };
+
   const deleteNote = async id => {
     try {
-      const db = getFirestore();
       await deleteDoc(doc(db, 'Notes', id));
     } catch (error) {
       console.error('Error deleting note:', error);
     }
   };
 
-  // Render note item
   const renderItem = ({item}) => (
-    <TouchableOpacity onPress={() => deleteNote(item.id)}>
-      <Text style={styles.noteItem}>{item.text}</Text>
+    <TouchableOpacity
+      onPress={() => {
+        setSelectedNote(item);
+        setReminderTime(
+          item.reminderTime ? item.reminderTime.toDate() : new Date(),
+        );
+        setShowPicker(true);
+      }}>
+      <Text style={styles.noteItem}>
+        {item.text}{' '}
+        {item.reminderTime
+          ? `- Reminder: ${item.reminderTime.toDate().toLocaleString()}`
+          : ''}
+      </Text>
     </TouchableOpacity>
   );
 
-  // Login screen for unauthenticated users
   if (!user) {
     return (
       <View style={styles.container}>
@@ -318,7 +389,6 @@ const App = () => {
     );
   }
 
-  // Note-taking screen for authenticated users
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Note-Taking App</Text>
@@ -330,6 +400,11 @@ const App = () => {
         value={note}
         onChangeText={setNote}
       />
+      <Button
+        title="Pick Reminder Time"
+        onPress={() => setShowPicker(true)}
+        color="#007AFF"
+      />
       <Button title="Save Note" onPress={addNote} color="#007AFF" />
       <FlatList
         data={notes}
@@ -337,16 +412,39 @@ const App = () => {
         keyExtractor={item => item.id}
         style={styles.list}
       />
+
+      <Modal visible={showPicker} transparent animationType="slide">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <DateTimePicker
+              value={reminderTime}
+              mode="datetime"
+              display="default"
+              onChange={(event, date) => date && setReminderTime(date)}
+            />
+            <Button
+              title="Set Reminder"
+              onPress={() =>
+                selectedNote
+                  ? setReminder(selectedNote.id)
+                  : setShowPicker(false)
+              }
+              color="#007AFF"
+            />
+            <Button
+              title="Cancel"
+              onPress={() => setShowPicker(false)}
+              color="#FF3B30"
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: '#f5f5f5',
-  },
+  container: {flex: 1, padding: 20, backgroundColor: '#f5f5f5'},
   title: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -368,9 +466,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#fff',
   },
-  list: {
-    marginTop: 20,
-  },
+  list: {marginTop: 20},
   noteItem: {
     padding: 15,
     fontSize: 16,
@@ -379,6 +475,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 5,
     marginBottom: 5,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
+    alignItems: 'center',
   },
 });
 
