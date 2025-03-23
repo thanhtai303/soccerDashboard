@@ -8,8 +8,18 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Alert,
 } from 'react-native';
 import {initializeApp, getApps} from '@react-native-firebase/app';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithCredential,
+} from '@react-native-firebase/auth';
 import {
   getFirestore,
   collection,
@@ -17,6 +27,8 @@ import {
   addDoc,
   deleteDoc,
   doc,
+  query,
+  where,
   serverTimestamp,
 } from '@react-native-firebase/firestore';
 import {
@@ -28,6 +40,10 @@ import {
   onNotificationOpenedApp,
 } from '@react-native-firebase/messaging';
 import PushNotification from 'react-native-push-notification';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -40,34 +56,121 @@ const firebaseConfig = {
   measurementId: 'G-RJF7C0VNXY',
 };
 
-// Initialize Firebase only if no apps are initialized
+// Initialize Firebase
 if (!getApps().length) {
   initializeApp(firebaseConfig);
 }
 
+// Configure Google Sign-In
+GoogleSignin.configure({
+  webClientId: 'YOUR_WEB_CLIENT_ID_FROM_FIREBASE', // Replace with your Firebase Google Web Client ID
+});
+
 // Configure local notifications
 PushNotification.configure({
-  onNotification: function (notification) {
-    console.log('Local Notification:', notification);
-  },
+  onNotification: notification =>
+    console.log('Local Notification:', notification),
   requestPermissions: Platform.OS === 'ios',
 });
 
 const App = () => {
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [note, setNote] = useState('');
   const [notes, setNotes] = useState([]);
   const [isSeeded, setIsSeeded] = useState(false);
 
-  // Request FCM permission and get token
-  const requestNotificationPermission = async () => {
-    const messaging = getMessaging(); // Get messaging instance
+  const auth = getAuth();
+
+  // Monitor authentication state and setup messaging/notes
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async user => {
+      setUser(user);
+      if (user) {
+        // Setup FCM and Firestore listeners for authenticated user
+        const setupMessagingAndNotes = async currentUser => {
+          const messaging = getMessaging();
+          await requestNotificationPermission(messaging, currentUser);
+
+          if (Platform.OS === 'android') {
+            PushNotification.createChannel(
+              {
+                channelId: 'default-channel-id',
+                channelName: 'Default Channel',
+                soundName: 'default',
+                importance: 4,
+                vibrate: true,
+              },
+              created => console.log(`Channel created: ${created}`),
+            );
+          }
+
+          const unsubscribeForeground = onMessage(
+            messaging,
+            async remoteMessage => {
+              showLocalNotification(
+                remoteMessage.notification.title,
+                remoteMessage.notification.body,
+              );
+            },
+          );
+
+          onNotificationOpenedApp(messaging, remoteMessage => {
+            console.log('Notification opened:', remoteMessage);
+          });
+
+          getInitialNotification(messaging).then(remoteMessage => {
+            if (remoteMessage)
+              console.log('App opened from quit state:', remoteMessage);
+          });
+
+          const db = getFirestore();
+          const notesQuery = query(
+            collection(db, 'Notes'),
+            where('userId', '==', currentUser.uid),
+          );
+          const unsubscribeFirestore = onSnapshot(notesQuery, snapshot => {
+            const notesList = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data(),
+            }));
+            setNotes(notesList);
+
+            snapshot.docChanges().forEach(change => {
+              if (change.type === 'added') {
+                const newNote = change.doc.data();
+                showLocalNotification('New Note Added', newNote.text);
+              }
+            });
+
+            if (notesList.length === 0 && !isSeeded) {
+              seedData(currentUser).then(() => setIsSeeded(true));
+            }
+          });
+
+          return () => {
+            unsubscribeForeground();
+            unsubscribeFirestore();
+          };
+        };
+
+        await setupMessagingAndNotes(user);
+      }
+    });
+
+    return unsubscribeAuth;
+  }, [auth, isSeeded]); // Dependencies: auth and isSeeded
+
+  // Request FCM permission and store token
+  const requestNotificationPermission = async (messaging, currentUser) => {
     const authStatus = await requestPermission();
     const enabled = authStatus === 1 || authStatus === 2;
     if (enabled) {
-      const token = await getToken(messaging); // Pass messaging instance
+      const token = await getToken(messaging);
       console.log('FCM Token:', token);
       const db = getFirestore();
-      await addDoc(collection(db, 'Tokens'), {token});
+      await addDoc(collection(db, 'Tokens'), {token, userId: currentUser.uid});
     }
   };
 
@@ -75,8 +178,8 @@ const App = () => {
   const showLocalNotification = (title, message) => {
     PushNotification.localNotification({
       channelId: 'default-channel-id',
-      title: title,
-      message: message,
+      title,
+      message,
       playSound: true,
       soundName: 'default',
       importance: 4,
@@ -84,100 +187,82 @@ const App = () => {
     });
   };
 
-  useEffect(() => {
-    requestNotificationPermission();
-
-    // Create notification channel for Android
-    if (Platform.OS === 'android') {
-      PushNotification.createChannel(
-        {
-          channelId: 'default-channel-id',
-          channelName: 'Default Channel',
-          soundName: 'default',
-          importance: 4,
-          vibrate: true,
-        },
-        created => console.log(`Channel created: ${created}`),
-      );
-    }
-
-    // Get messaging instance
-    const messaging = getMessaging();
-
-    // Handle foreground FCM messages
-    const unsubscribeForeground = onMessage(messaging, async remoteMessage => {
-      // Pass messaging instance
-      showLocalNotification(
-        remoteMessage.notification.title,
-        remoteMessage.notification.body,
-      );
-    });
-
-    // Handle notification tap when app is in background
-    onNotificationOpenedApp(messaging, remoteMessage => {
-      // Pass messaging instance
-      console.log('Notification opened:', remoteMessage);
-    });
-
-    // Handle notification tap when app is quit
-    getInitialNotification(messaging).then(remoteMessage => {
-      // Pass messaging instance
-      if (remoteMessage) {
-        console.log('App opened from quit state:', remoteMessage);
-      }
-    });
-
-    // Fetch notes in real-time and simulate Cloud Function notification
-    const db = getFirestore();
-    const unsubscribeFirestore = onSnapshot(
-      collection(db, 'Notes'),
-      snapshot => {
-        const notesList = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setNotes(notesList);
-
-        snapshot.docChanges().forEach(change => {
-          if (change.type === 'added') {
-            const newNote = change.doc.data();
-            showLocalNotification('New Note Added', newNote.text);
-          }
-        });
-
-        if (notesList.length === 0 && !isSeeded) {
-          seedData().then(() => setIsSeeded(true));
-        }
-      },
-    );
-
-    return () => {
-      unsubscribeForeground();
-      unsubscribeFirestore();
-    };
-  }, [isSeeded]);
-
-  // Seed sample data
-  const seedData = async () => {
+  // Seed sample data for the user
+  const seedData = async currentUser => {
     const db = getFirestore();
     const sampleNotes = [
-      {text: 'Buy groceries', createdAt: serverTimestamp()},
-      {text: 'Finish assignment', createdAt: serverTimestamp()},
-      {text: 'Call mom', createdAt: serverTimestamp()},
+      {
+        text: 'Buy groceries',
+        createdAt: serverTimestamp(),
+        userId: currentUser.uid,
+      },
+      {
+        text: 'Finish assignment',
+        createdAt: serverTimestamp(),
+        userId: currentUser.uid,
+      },
+      {text: 'Call mom', createdAt: serverTimestamp(), userId: currentUser.uid},
     ];
     for (const note of sampleNotes) {
       await addDoc(collection(db, 'Notes'), note);
     }
   };
 
-  // Add a new note to Firestore
+  // Authentication handlers
+  const register = async () => {
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      setEmail('');
+      setPassword('');
+    } catch (error) {
+      Alert.alert('Registration Error', error.message);
+    }
+  };
+
+  const login = async () => {
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      setEmail('');
+      setPassword('');
+    } catch (error) {
+      Alert.alert('Login Error', error.message);
+    }
+  };
+
+  const googleSignIn = async () => {
+    try {
+      await GoogleSignin.hasPlayServices();
+      const {idToken} = await GoogleSignin.signIn();
+      const googleCredential = GoogleAuthProvider.credential(idToken);
+      await signInWithCredential(auth, googleCredential);
+    } catch (error) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        Alert.alert('Cancelled', 'Google Sign-In was cancelled');
+      } else {
+        Alert.alert('Google Sign-In Error', error.message);
+      }
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      setNotes([]);
+      setIsSeeded(false);
+    } catch (error) {
+      Alert.alert('Logout Error', error.message);
+    }
+  };
+
+  // Add a new note
   const addNote = async () => {
-    if (note.trim()) {
+    if (note.trim() && user) {
       try {
         const db = getFirestore();
         await addDoc(collection(db, 'Notes'), {
           text: note,
           createdAt: serverTimestamp(),
+          userId: user.uid,
         });
         setNote('');
       } catch (error) {
@@ -186,7 +271,7 @@ const App = () => {
     }
   };
 
-  // Delete a note from Firestore
+  // Delete a note
   const deleteNote = async id => {
     try {
       const db = getFirestore();
@@ -196,16 +281,49 @@ const App = () => {
     }
   };
 
-  // Render each note item
+  // Render note item
   const renderItem = ({item}) => (
     <TouchableOpacity onPress={() => deleteNote(item.id)}>
       <Text style={styles.noteItem}>{item.text}</Text>
     </TouchableOpacity>
   );
 
+  // Login screen for unauthenticated users
+  if (!user) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Login / Register</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        <Button title="Register" onPress={register} color="#007AFF" />
+        <Button title="Login" onPress={login} color="#007AFF" />
+        <Button
+          title="Sign In with Google"
+          onPress={googleSignIn}
+          color="#DB4437"
+        />
+      </View>
+    );
+  }
+
+  // Note-taking screen for authenticated users
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Note-Taking App</Text>
+      <Text style={styles.subtitle}>Welcome, {user.email}</Text>
+      <Button title="Logout" onPress={logout} color="#FF3B30" />
       <TextInput
         style={styles.input}
         placeholder="Enter your note"
@@ -235,6 +353,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
     color: '#333',
+  },
+  subtitle: {
+    fontSize: 16,
+    marginBottom: 10,
+    textAlign: 'center',
+    color: '#666',
   },
   input: {
     borderWidth: 1,
